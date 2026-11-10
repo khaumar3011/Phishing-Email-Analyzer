@@ -1,8 +1,31 @@
+import os
+import time
+import base64
+import requests
 import email
 import re
 import sys
 from email import policy
 from email.parser import BytesParser
+
+def check_virustotal(url, api_key):
+    # VirusTotal identifies a URL by its base64 version
+    url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
+    response = requests.get(
+        f"https://www.virustotal.com/api/v3/urls/{url_id}",
+        headers={"x-apikey": api_key},
+        timeout=15,
+    )
+    if response.status_code == 404:
+        return {"malicious": 0, "suspicious": 0, "text": "not in VirusTotal database"}
+    if response.status_code != 200:
+        return {"malicious": 0, "suspicious": 0, "text": f"lookup failed ({response.status_code})"}
+    stats = response.json()["data"]["attributes"]["last_analysis_stats"]
+    return {
+        "malicious": stats["malicious"],
+        "suspicious": stats["suspicious"],
+        "text": f"{stats['malicious']} malicious, {stats['suspicious']} suspicious",
+    }
 
 def analyze_email(file_path):
     print("\n===== PHISHING EMAIL ANALYZER =====\n")
@@ -55,6 +78,19 @@ def analyze_email(file_path):
         for url in urls:
             if any(s in url for s in shorteners):
                 flags.append(f"⚠️  Shortened URL detected: {url}")
+	        # VirusTotal check
+        api_key = os.environ.get("VT_API_KEY")
+        if api_key:
+            print("\n🔬 VIRUSTOTAL RESULTS")
+            for i, url in enumerate(urls[:4]):
+                result = check_virustotal(url, api_key)
+                print(f"  - {url[:60]} -> {result['text']}")
+                if result["malicious"] > 0 or result["suspicious"] > 0:
+                    flags.append(f"🔴 VirusTotal flagged URL: {url}")
+                if i < len(urls[:4]) - 1:
+                    time.sleep(15)
+        else:
+            print("\n  (Set VT_API_KEY to enable VirusTotal checks)")
     else:
         print("  No links found.")
 
