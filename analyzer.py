@@ -1,3 +1,5 @@
+from html.parser import HTMLParser
+from urllib.parse import urlparse
 import os
 import time
 import base64
@@ -7,6 +9,28 @@ import re
 import sys
 from email import policy
 from email.parser import BytesParser
+
+class LinkExtractor(HTMLParser):
+    # Collects every link in an HTML email as (real address, visible text)
+    def __init__(self):
+        super().__init__()
+        self.links = []
+        self._href = None
+        self._text = ""
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self._href = dict(attrs).get("href")
+            self._text = ""
+
+    def handle_data(self, data):
+        if self._href is not None:
+            self._text += data
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._href is not None:
+            self.links.append((self._href, self._text))
+            self._href = None
 
 def check_virustotal(url, api_key):
     # VirusTotal identifies a URL by its base64 version
@@ -62,14 +86,31 @@ def analyze_email(file_path):
     # --- EXTRACT LINKS ---
     print("\n🔗 LINKS FOUND IN EMAIL")
     body = ""
-    if msg.is_multipart():
-        for part in msg.walk():
-            if part.get_content_type() == 'text/plain':
-                body += part.get_content()
-    else:
-        body = msg.get_content()
+    html_links = []
+    for part in msg.walk():
+        if part.get_filename():
+            continue  # skip attachments
+        ctype = part.get_content_type()
+        if ctype == 'text/plain':
+            body += part.get_content()
+        elif ctype == 'text/html':
+            extractor = LinkExtractor()
+            extractor.feed(part.get_content())
+            html_links.extend(extractor.links)
 
     urls = re.findall(r'https?://[^\s<>"]+', body)
+    for href, text in html_links:
+        if href.startswith(('http://', 'https://')) and href not in urls:
+            urls.append(href)
+
+    # Flag links where the visible text points somewhere different than the real link
+    for href, text in html_links:
+        shown = text.strip()
+        if shown.lower().startswith(('http://', 'https://', 'www.')):
+            shown_host = urlparse(shown if '://' in shown else 'http://' + shown).netloc.lower()
+            real_host = urlparse(href).netloc.lower()
+            if shown_host and real_host and shown_host != real_host:
+                flags.append(f"⚠️  Link text shows {shown_host} but goes to {real_host}")
     if urls:
         for url in urls:
             print(f"  - {url}")

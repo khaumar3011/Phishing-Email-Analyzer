@@ -1,0 +1,9 @@
+From: PayPal <service@paypa1-secure.com>
+To: you@example.com
+Subject: Action required: account suspended
+Date: Mon, 09 Nov 2026 10:00:00 +0000
+Content-Type: text/html
+
+<html><body><p>Your account has been suspended.</p>
+<a href="http://evil-login.example.net/paypal">https://www.paypal.com/verify</a>
+</body></html>
